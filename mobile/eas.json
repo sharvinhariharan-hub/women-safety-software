@@ -18,6 +18,25 @@
     },
     "production": {
       "autoIncrement": true
+    },
+    "ios-device-preview": {
+      "extends": "preview",
+      "developmentClient": false,
+      "node": "24.18.0",
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release",
+        "credentialsSource": "remote"
+      }
+    },
+    "ios-simulator-preview": {
+      "extends": "preview",
+      "developmentClient": false,
+      "node": "24.18.0",
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
     }
   }
 }

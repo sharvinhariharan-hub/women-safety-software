@@ -1,0 +1,58 @@
+name: Build iOS previews
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["mobile/**", "scripts/build-ios-preview.sh", ".github/workflows/ios-preview.yml"]
+  pull_request:
+    paths: ["mobile/**", "scripts/build-ios-preview.sh", ".github/workflows/ios-preview.yml"]
+permissions:
+  contents: read
+jobs:
+  ios:
+    name: iOS ${{ matrix.target }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [simulator, unsigned-device]
+    env:
+      EXPO_PUBLIC_PREVIEW_MODE: "true"
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+        working-directory: mobile
+      - run: npm run typecheck && npm run lint -- --max-warnings 0
+        working-directory: mobile
+      - name: Generate iOS project
+        run: npx expo prebuild --platform ios --no-install
+        working-directory: mobile
+      - name: Install native dependencies
+        run: pod install --project-directory=ios
+        working-directory: mobile
+      - name: Compile and package iOS preview
+        run: bash scripts/build-ios-preview.sh '${{ matrix.target }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: women-safety-ios-${{ matrix.target }}-preview
+          path: mobile/dist-ios/*
+          if-no-files-found: error
+      - name: Explain installation boundary
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$TARGET" = simulator ]; then
+            echo '### iOS Simulator preview' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Download the simulator archive from Artifacts. Requires a Mac with Xcode; it does not install on an iPhone.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '### Unsigned iPhone preview' >> "$GITHUB_STEP_SUMMARY"
+            echo 'This IPA validates compilation for iPhone hardware. It must be signed and provisioned before installation; downloading it in Safari does not install it. See docs/IOS.md for signing outside the App Store.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo 'Offline preview only: no alerts, calls, GPS, camera, or microphone access.' >> "$GITHUB_STEP_SUMMARY"

@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# iOS build artifacts and local signing configuration
+/dist-ios/
+/build-ios-*/
+credentials.json
+*.ipa
+*.xcarchive

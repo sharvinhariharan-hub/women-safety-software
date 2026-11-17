@@ -2,7 +2,10 @@
 
 One button to ask your chosen people for help, with SMS and WhatsApp alerts containing coordinates, a map link, and a private live-location link.
 
-**Version 0.4.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
+**Android + iOS · Version 0.4.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
+
+Builds and installation: [iOS downloads and installation without the App Store](docs/IOS.md) · [Android installation](docs/INSTALLING.md). iPhone installation requires Apple signing; simulator builds and unsigned IPA files are labelled separately.
+
 
 ## What is implemented
 

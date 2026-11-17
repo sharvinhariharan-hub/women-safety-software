@@ -15,11 +15,9 @@ The preview has a separate application ID from a future live build. It uses samp
 
 This artifact targets ARM64 phones; x86 emulators and older 32-bit phones require a separately built architecture. Actual installation and native interaction on the user's physical phone are not performed from this chat.
 
-## iPhone
+## iPhone and iPad
 
-The iOS app identity and launcher icon are configured, and the iOS JavaScript bundle is checked in CI. A native iPhone app still requires Apple's signing/provisioning and an appropriate installation route (for example, an Xcode development build or TestFlight). An Android APK cannot install on an iPhone. No signed iOS IPA or TestFlight upload is produced by this repository's Android workflow.
-
-With Xcode configured, a local native development build can be produced with `npx expo run:ios` in `mobile/`. For an offline preview set `EXPO_PUBLIC_PREVIEW_MODE=true` for the build. The preview branch does not access live APIs or GPS; the additional Android permission checks are Android-specific.
+Use [iOS builds and installation without the App Store](IOS.md). The GitHub iOS workflow compiles separate simulator and unsigned device previews. An unsigned IPA cannot install directly on an iPhone; use Xcode signing for personal device testing or a signed ad hoc Expo build for registered devices. No App Store listing is needed. The source uses the same contact, permission, SOS, and optional evidence flows on both platforms.
 
 ## Local browser preview
 
