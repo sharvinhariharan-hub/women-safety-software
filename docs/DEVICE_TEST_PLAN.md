@@ -1,16 +1,16 @@
 # Device acceptance plan
 
-Status: **not executed on physical devices for v0.2.0**. Never rely on this release for real emergencies until its behavior has been validated for the supported devices and deployment.
+Status: **not executed on physical devices for v0.4.0**. Never rely on this release for real emergencies until its behavior has been validated for the supported devices and deployment.
 
 Use test mode and fictional contacts first. Coordinate a separate live SMS test with consenting recipients; do not contact police or emergency dispatch as an unannounced test.
 
 | Scenario                                 | Expected observation                                                                         |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Prepared app, one tap                    | One incident, one job per selected contact, no second confirmation                           |
+| Prepared app, two-second hold           | One incident, one job per selected channel, no second confirmation                           |
 | GPS slow or denied                       | SOS still created; location unavailable is explicit                                          |
 | Repeated taps or API timeout             | Same active incident; no duplicate initial SMS                                               |
 | Server unreachable                       | Unconfirmed request persisted; visible retry state; no claim of delivery                     |
-| App reopened after offline request       | Same request ID retried; existing incident recovered                                         |
+| App reopened after offline request       | Existing incident recovered; fresh hold required to authorize retry                                         |
 | Phone loses internet after activation    | Recipient location becomes stale; latest fix uploads when connectivity and execution return  |
 | Foreground tracking                      | Position timestamp and accuracy update on recipient page                                     |
 | Background and locked phone              | Test each OS/version and battery mode; verify updates or record interruption                 |
@@ -32,3 +32,5 @@ Use test mode and fictional contacts first. Coordinate a separate live SMS test 
 | Six contacts and weak connection         | Measure tap-to-server, provider acceptance, receipt, and human acknowledgement separately    |
 
 Target delivery latency is a measured engineering objective, not an emergency-response guarantee. Maintain a supported-device matrix and record test dates/build numbers.
+
+Additional v0.4 native checks (not yet executed): contact picker grant/cancel/deny/limited access; multiple phone numbers and international formatting; manual-entry fallback; location services off; foreground-only and permanent denial; background OS settings handoff; camera denial without microphone prompt; microphone denial; setup grants without recording; explicit start/stop, 120-second/50-MiB cap, app background/unmount/call interruption, low storage, file save failure, durable clip list, explicit export, and delete confirmation. Verify SOS submission/tracking continues independently of recording and denial.

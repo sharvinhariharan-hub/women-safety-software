@@ -2,7 +2,7 @@
   "expo": {
     "name": "Women Safety",
     "slug": "women-safety-software",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -35,7 +35,23 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ],
-      "expo-router"
+      "expo-router",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Choose trusted people for your safety circle. Only contacts you select are saved to your safety server."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Record optional video evidence when you choose to during an active SOS.",
+          "microphonePermission": "Include audio in optional SOS evidence recordings.",
+          "recordAudioAndroid": true,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      "expo-sharing"
     ],
     "scheme": "womensafety"
   }

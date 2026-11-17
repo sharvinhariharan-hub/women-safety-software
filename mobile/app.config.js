@@ -6,7 +6,7 @@ module.exports = ({ config }) => {
     "android.permission.WRITE_EXTERNAL_STORAGE",
     "android.permission.SEND_SMS",
     "android.permission.CALL_PHONE",
-    "android.permission.RECORD_AUDIO",
+    "android.permission.WRITE_CONTACTS",
   ];
   if (!preview)
     return {
@@ -34,6 +34,8 @@ module.exports = ({ config }) => {
         "android.permission.SEND_SMS",
         "android.permission.CALL_PHONE",
         "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_CONTACTS",
       ],
     },
   };

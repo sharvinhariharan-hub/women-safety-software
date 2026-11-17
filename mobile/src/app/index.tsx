@@ -4,6 +4,7 @@ import {
   Alert,
   AppState,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -13,6 +14,12 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { router } from "expo-router";
+import { SetupPermissions } from "../components/SetupPermissions";
+import {
+  Contact as PhoneContact,
+  requestPermissionsAsync as requestContactsPermission,
+} from "expo-contacts";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SosButton } from "../components/SosButton";
@@ -69,6 +76,7 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [editing, setEditing] = useState(true);
+  const [permissions, setPermissions] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [booting, setBooting] = useState(true);
@@ -132,7 +140,7 @@ export default function App() {
       const next = await api<Status>(config, "/api/status");
       setStatus(next);
       if (!next.profile) setEditing(true);
-      else await storage.write("prepared", true);
+
       if (!next.active && (await storage.read("session"))) await stopTracking();
       setError((old) => (old.startsWith("SOS not confirmed") ? old : ""));
       await uploadLatest().catch(() => {});
@@ -145,11 +153,12 @@ export default function App() {
     if (!config) return;
     let mounted = true;
     api<Status>(config, "/api/status")
-      .then((next) => {
+      .then(async (next) => {
+        const prepared = await storage.read<boolean>("prepared");
         if (mounted) {
           setStatus(next);
           setProfile(next.profile ?? emptyProfile);
-          setEditing(!next.profile);
+          setEditing(!next.profile || !prepared);
         }
       })
       .catch((e) => {
@@ -249,12 +258,13 @@ export default function App() {
       if (parsed.protocol !== "https:" && result.mode !== "test")
         throw new Error("Use HTTPS for a live connection");
       await storage.write("config", next);
-      await storage.write("prepared", Boolean(result.profile));
+      await storage.write("prepared", false);
       setPairing(false);
       setConfig(next);
       setStatus(result);
       setProfile(result.profile ?? emptyProfile);
-      setEditing(!result.profile);
+      setPermissions(false);
+      setEditing(true);
     } catch (e) {
       setError(message(e));
     } finally {
@@ -267,15 +277,7 @@ export default function App() {
     setError("");
     try {
       await api(config, "/api/profile", "PUT", profile);
-      await storage.write("prepared", true);
-      const permission = PREVIEW_MODE
-        ? { status: "granted" }
-        : await Location.requestForegroundPermissionsAsync();
-      setNotice(
-        permission.status === "granted"
-          ? "Location ready while the app is open."
-          : "Location denied. SOS texts can still be submitted, without a location.",
-      );
+      setPermissions(true);
       setEditing(false);
       await refresh();
     } catch (e) {
@@ -284,35 +286,80 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function backgroundPermission() {
+  async function importContact(index: number) {
     if (PREVIEW_MODE) {
-      setNotice("Offline preview: no location permission is requested.");
+      updateContact(index, {
+        name: "Sample contact",
+        phone: "+12025550100",
+        consentConfirmed: false,
+      });
+      setNotice(
+        "Preview: sample contact added. Your address book was not accessed.",
+      );
       return;
     }
+    setBusy(true);
+    setError("");
     try {
-      Alert.alert(
-        "Background location",
-        "Your phone may open system settings. Allow background location to keep updating an active SOS when this app is not on screen. System indicators may be visible.",
-        [
-          { text: "Later", style: "cancel" },
-          {
-            text: "Continue",
-            onPress: () => {
-              void Location.requestBackgroundPermissionsAsync()
-                .then((p) =>
-                  setNotice(
-                    p.status === "granted"
-                      ? "Background location permitted. A development build is required."
-                      : "Background permission denied. Keep the app open during SOS.",
-                  ),
-                )
-                .catch((e) => setError(message(e)));
-            },
-          },
-        ],
+      const permission = await requestContactsPermission();
+      if (!permission.granted) {
+        setNotice(
+          "Contact access declined. You can type a name and number instead.",
+        );
+        if (!permission.canAskAgain)
+          Alert.alert(
+            "Contact permission is off",
+            "Type the contact manually, or open this app’s phone permissions to allow the contact picker.",
+            [
+              { text: "Enter manually", style: "cancel" },
+              {
+                text: "Open settings",
+                onPress: () => {
+                  void Linking.openSettings().catch(() =>
+                    setError("Could not open phone settings."),
+                  );
+                },
+              },
+            ],
+          );
+        return;
+      }
+      const chosen = await PhoneContact.presentPicker();
+      if (!chosen) return;
+      const [name, entries] = await Promise.all([
+        chosen.getFullName(),
+        chosen.getPhones(),
+      ]);
+      const phones = entries.filter((p): p is typeof p & { number: string } =>
+        Boolean(p.number),
       );
+      if (!phones.length)
+        throw new Error(
+          "This contact has no phone number. Enter one manually.",
+        );
+      const selectPhone = (phone: string) =>
+        updateContact(index, {
+          name,
+          phone: phone.replace(/[\s().-]/g, ""),
+          consentConfirmed: false,
+        });
+      if (phones.length === 1) selectPhone(phones[0].number);
+      else
+        Alert.alert(
+          "Choose a phone number",
+          "Include the country code before saving.",
+          [
+            ...phones.slice(0, 8).map((p) => ({
+              text: `${p.label ?? "Phone"}: ${p.number}`,
+              onPress: () => selectPhone(p.number),
+            })),
+            { text: "Cancel", style: "cancel" },
+          ],
+        );
     } catch (e) {
       setError(message(e));
+    } finally {
+      setBusy(false);
     }
   }
   async function trigger() {
@@ -352,7 +399,15 @@ export default function App() {
     setProfile((p) => ({
       ...p,
       contacts: p.contacts.map((c, i) =>
-        i === index ? { ...c, ...changes } : c,
+        i === index
+          ? {
+              ...c,
+              ...changes,
+              ...(changes.phone !== undefined && changes.phone !== c.phone
+                ? { consentConfirmed: false }
+                : {}),
+            }
+          : c,
       ),
     }));
   }
@@ -379,7 +434,7 @@ export default function App() {
             <View>
               <Text style={s.brand}>Women Safety</Text>
             </View>
-            {config && !pairing ? (
+            {config && !pairing && !permissions ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={editing ? "Back to SOS" : "Settings"}
@@ -455,8 +510,21 @@ export default function App() {
                 />
               ) : null}
             </View>
+          ) : permissions ? (
+            <SetupPermissions
+              onBack={() => {
+                setPermissions(false);
+                setEditing(true);
+              }}
+              onDone={async () => {
+                await storage.write("prepared", true);
+                setPermissions(false);
+                setEditing(false);
+              }}
+            />
           ) : editing ? (
             <View style={s.card}>
+              <Text style={s.caption}>SETUP · 1 OF 2</Text>
               <Text style={s.heading}>Choose your safety circle</Text>
               <Text style={s.body}>
                 Add up to six people or consenting support organisations. Use
@@ -473,6 +541,12 @@ export default function App() {
               {profile.contacts.map((contact, i) => (
                 <View style={s.contact} key={i}>
                   <Text style={s.label}>Contact {i + 1}</Text>
+                  <Action
+                    title="Choose from phone contacts"
+                    onPress={() => void importContact(i)}
+                    secondary
+                    disabled={busy}
+                  />
                   <TextInput
                     accessibilityLabel={`Contact ${i + 1} name`}
                     placeholder="Name"
@@ -578,8 +652,17 @@ export default function App() {
                 . Telephone calls are not connected.
               </Text>
               <Action
-                title="Location permissions"
-                onPress={() => void backgroundPermission()}
+                title="Permissions & evidence"
+                onPress={() => {
+                  setEditing(false);
+                  setPermissions(true);
+                }}
+                secondary
+                disabled={busy}
+              />
+              <Action
+                title="Saved recordings"
+                onPress={() => router.push("/evidence")}
                 secondary
                 disabled={busy}
               />
@@ -591,7 +674,7 @@ export default function App() {
               />
               {
                 <Action
-                  title="Save contacts & prepare location"
+                  title="Save contacts & continue"
                   onPress={() => void saveProfile()}
                   disabled={busy}
                 />
@@ -624,7 +707,7 @@ export default function App() {
                   : pending
                     ? "Hold to resume the same request. Opening the app does not resend it."
                     : PREVIEW_MODE
-                      ? "3 sample contacts · offline preview"
+                      ? `${status?.profile?.contacts.length ?? 0} sample contacts · offline preview`
                       : `${status?.profile?.contacts.length ?? 0} selected emergency contacts`}
               </Text>
               {!active ? (
@@ -670,6 +753,11 @@ export default function App() {
               ) : null}
               {active ? (
                 <>
+                  <Action
+                    title="Record evidence (optional)"
+                    onPress={() => router.push("/evidence")}
+                    secondary
+                  />
                   <Action
                     title={
                       details ? "Hide delivery status" : "View delivery status"

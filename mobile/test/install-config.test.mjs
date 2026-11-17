@@ -36,6 +36,9 @@ test("Android preview has a separate icon identity and denies Internet, location
       "SEND_SMS",
       "CALL_PHONE",
       "RECORD_AUDIO",
+      "CAMERA",
+      "READ_CONTACTS",
+      "WRITE_CONTACTS",
     ])
       assert.ok(
         preview.android.blockedPermissions.includes(

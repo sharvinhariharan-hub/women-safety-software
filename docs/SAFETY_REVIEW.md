@@ -1,4 +1,4 @@
-# Safety and usability review — v0.3
+# Safety and usability review — v0.4
 
 This is an engineering review of the implemented prototype. It is not a certification, emergency-service approval, app-store approval, or a claim that every production scenario works.
 
@@ -17,7 +17,7 @@ The user story is: app icon opens an idle home screen → deliberate two-second 
 | Private location       | Authenticated writes, restricted recipient data, timestamps/accuracy, stale fixes, link expiry, revocation, encrypted storage, and retention are tested.                                                                                                                         |
 | Voice                  | Grounded Pipecat replies, unknown facts, stale positions, unavailable/ended incidents, no dispatch claims, and a loopback-only speech bridge are tested. No telephone calling endpoint exists.                                                                                   |
 | Test network safety    | Node test runner blocks external fetches and fails on an attempted external request. Voice test runner blocks external socket connections/name lookups. Local loopback fixtures are allowed.                                                                                     |
-| Offline preview        | Preview uses in-memory sample contacts, no live API fallback, no GPS reads, and no real messages/calls. Its Android configuration removes Internet, location, SMS, phone, microphone, overlay, and unnecessary runtime permissions. APK CI also checks merged permission output. |
+| Offline preview        | Preview uses in-memory sample contacts, no live API fallback, no GPS reads, and no real messages/calls. Its Android configuration removes Internet, location, SMS, phone, microphone, camera, contact access, overlay, and unnecessary runtime permissions. APK CI also checks merged permission output. |
 | Phone identity         | Custom 1024px launcher assets, Android adaptive/themed icons, native application IDs, launcher activity from prebuild, and a separate preview app identity are configured.                                                                                                       |
 
 The browser test found a timer-binding bug that pure logic tests did not expose. The timer was changed to call the global timer functions through wrappers; the short-tap and long-hold browser tests then passed. This is why bundle/type checks are not presented as proof of physical-device reliability.
@@ -46,3 +46,9 @@ npm --prefix mobile run lint -- --max-warnings 0
 ```
 
 These checks must remain isolated. Do not replace local/mock test transports with production credentials for routine verification. No real emergency-service test should be performed without prior coordination.
+
+## v0.4 setup and optional evidence
+
+First-run setup exposes the contact picker/manual entry and then separate, explained permission actions. Contact changes reset recipient consent. Foreground permission is requested directly, background permission follows foreground access, and denial leaves SOS available. Camera and microphone are requested sequentially only when enabling optional evidence. Permission grants never start a recording. The preview returns before native permission APIs and its Android package blocks contacts/camera/microphone as well as network/location/calling/messaging.
+
+Automated permission tests cover preview isolation, camera denial preventing the microphone prompt, microphone denial keeping recording disabled, and enabling evidence only after both grants. Existing backend/activation tests remain isolated from external networks. Browser checks cover contact selection simulation, permission setup, finish-to-SOS, deliberate hold, and evidence remaining simulated. Native prompts, capture quality, interruption/save recovery, export/deletion, and camera lifecycle need physical-device validation. Recordings remain in app-private document storage; no extra application-level encryption is claimed, and OS backups may include them.

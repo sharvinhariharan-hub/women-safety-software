@@ -2,7 +2,7 @@
 
 One button to ask your chosen people for help, with SMS and WhatsApp alerts containing coordinates, a map link, and a private live-location link.
 
-**Version 0.3.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
+**Version 0.4.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
 
 ## What is implemented
 
@@ -22,7 +22,7 @@ This first release is **one owner per self-hosted backend**, paired using an ope
 
 ## Safe phone preview
 
-The home screen has one large SOS button. Hold it for two seconds; short taps and opening the app do not send an alert. Setup stays behind Settings. See [phone installation](docs/INSTALLING.md) and the [engineering safety review](docs/SAFETY_REVIEW.md). The offline preview cannot send messages or access GPS.
+The home screen has one large SOS button. Hold it for two seconds; short taps and opening the app do not send an alert. First-run setup asks you to choose up to six contacts (native picker or manual entry), then offers location, background sharing, and optional evidence permissions directly. Later, edit these under Settings. See [phone installation](docs/INSTALLING.md) and the [engineering safety review](docs/SAFETY_REVIEW.md). The offline preview cannot send messages or access GPS.
 
 <img src="docs/screenshots/sos-preview-home.jpg" width="260" alt="Offline phone preview with one large SOS button" />
 
@@ -123,7 +123,7 @@ Profiles, locations, private link tokens, and message payloads are encrypted wit
 
 Anyone holding a private location link can view it until sharing ends or expires. No login is required for recipients in this version. A compromised owner token controls the whole deployment: rotate it and re-pair the phone if exposed. No actual user details or credentials are included in source.
 
-There is no guaranteed one-minute delivery or response time. Carrier delays, lost connectivity, device shutdown, OS task termination, battery restrictions, permission changes, and unavailable location services can interrupt the flow. App-initiated SOS currently requires opening the app; lock-screen activation, voice/impact triggers, and physical accessories are outside this version. No telephone calls, audible alarms, or automatic recording are made. The optional local voice prototype uses a microphone only in the explicitly started browser test.
+There is no guaranteed one-minute delivery or response time. Carrier delays, lost connectivity, device shutdown, OS task termination, battery restrictions, permission changes, and unavailable location services can interrupt the flow. App-initiated SOS currently requires opening the app; lock-screen activation, voice/impact triggers, and physical accessories are outside this version. No telephone calls, audible alarms, or automatic recording are made. Optional video with audio requires explicit camera/microphone grants and an explicit recording action during an active SOS; it is limited to two minutes/50 MiB per clip. Clips are stored in the app’s private document directory, can be exported/deleted from Saved recordings, and are never attached to alerts or private links. OS/device backups may include app data, and uninstalling the app deletes local clips. Recording requires the installed Android/iOS app in the foreground; physical-device capture is not yet validated. The optional local voice prototype uses a microphone only in the explicitly started browser test.
 
 Additional work before a public safety deployment: physical-device validation, contact verification and opt-out flows, human acknowledgement/escalation, abuse controls for multiple accounts, monitored operations, independent security/accessibility review, and an agreed emergency-service integration.
 

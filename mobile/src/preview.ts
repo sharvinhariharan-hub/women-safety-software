@@ -17,7 +17,7 @@ let profile: Profile = {
 let active: Incident | null = null;
 const values = new Map<string, unknown>([
   ["config", PREVIEW_CONFIG],
-  ["prepared", true],
+  ["prepared", false],
 ]);
 export const previewStorage = {
   read<T>(key: string): T | null {
