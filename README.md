@@ -2,11 +2,11 @@
 
 One button to ask your chosen people for help, with SMS and WhatsApp alerts containing coordinates, a map link, and a private live-location link.
 
-**Version 0.2.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
+**Version 0.3.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
 
 ## What is implemented
 
-- Android/iOS app built with React Native and Expo, with a single-tap SOS after setup.
+- Android/iOS app built with React Native and Expo, with a a large SOS button after setup: hold for two seconds to activate.
 - One to six configurable, consenting contacts with international phone-number validation.
 - A local Pipecat voice prototype with local Whisper/Piper speech options and constrained, factual responses. No telephone calls are enabled.
 - An optional operator-configured reverse geocoder for approximate place names.
@@ -16,9 +16,15 @@ One button to ask your chosen people for help, with SMS and WhatsApp alerts cont
 - Twilio SMS and WhatsApp template adapters, with independent per-contact/channel statuses. Both carry coordinates, maps links, and the private tracking link; a single coordinate follow-up is sent if GPS arrives after the first alert. Test mode makes no provider calls.
 - Private, random 256-bit location links, a timestamp and accuracy for each fix, stale-location warnings, 24-hour expiry, and revocation when sharing ends.
 - Optional police-partner registry: select the nearest consenting, configured station within its service radius and submit an authenticated webhook with the live link. HTTP acceptance is never represented as police dispatch.
-- Idempotent SOS retries; duplicate taps do not create duplicate active incidents. An unconfirmed request is saved on the phone and retried while the app is open.
+- Idempotent SOS retries; duplicate taps do not create duplicate active incidents. An unconfirmed request is saved on the phone; it retries only after a deliberate activation in the current session. Reopening the app or returning from the background requires a fresh hold to resume it.
 
 This first release is **one owner per self-hosted backend**, paired using an operator-generated token. It does not yet provide public sign-up, multiple user accounts, verified contact onboarding, or a managed hosted service.
+
+## Safe phone preview
+
+The home screen has one large SOS button. Hold it for two seconds; short taps and opening the app do not send an alert. Setup stays behind Settings. See [phone installation](docs/INSTALLING.md) and the [engineering safety review](docs/SAFETY_REVIEW.md). The offline preview cannot send messages or access GPS.
+
+<img src="docs/screenshots/sos-preview-home.jpg" width="260" alt="Offline phone preview with one large SOS button" />
 
 ## Run the backend
 
@@ -57,7 +63,7 @@ These commands build a native development app. Android requires the Android SDK/
 2. Add your name and one to six contacts who agreed to receive SOS messages.
 3. Save the profile and grant foreground location access during setup.
 4. Optionally enable background location before an emergency. Operating-system indicators and Android's foreground-service notification may be visible.
-5. Select SMS, WhatsApp, or both for each contact, then tap **SOS** once. In test mode, every job explicitly says **Test only · nothing sent**.
+5. Select SMS, WhatsApp, or both for each contact, then hold **SOS** for two seconds. In test mode, every job explicitly says **Test only · nothing sent**.
 6. Inspect delivery states and location freshness. **End location sharing** revokes the link. It cannot recall texts or cancel an emergency response.
 
 If location access is denied, the alert still starts and the tracking page says that location is unavailable. If the server is unreachable, the app clearly states that the alert is unconfirmed and retries with the same request ID while open. It does not claim to send SMS through a phone with no internet.
@@ -132,6 +138,8 @@ npx expo install --check
 npx expo export --platform android --platform ios
 npm audit
 ```
+
+See [the safety review](docs/SAFETY_REVIEW.md) for the verified boundaries and [phone installation](docs/INSTALLING.md) for offline previews.
 
 The repository includes CI for backend tests, mobile TypeScript and lint, dependency compatibility, and both platform bundles. The scoped `@expo/fingerprint` minimatch override selects a patched release for an upstream tooling dependency.
 

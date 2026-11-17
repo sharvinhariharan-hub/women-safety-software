@@ -14,6 +14,10 @@ import {
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { SosButton } from "../components/SosButton";
+import { PREVIEW_MODE } from "../preview";
+import { createRetryAuthorization } from "../safety/hold";
 import * as Crypto from "expo-crypto";
 import * as Location from "expo-location";
 import {
@@ -72,6 +76,8 @@ export default function App() {
   const [pending, setPending] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const sending = useRef(false);
+  const retry = useRef(createRetryAuthorization());
+  const [details, setDetails] = useState(false);
   const active = status?.active ?? null;
   const activeId = active?.id,
     activeExpiresAt = active?.expiresAt;
@@ -80,8 +86,10 @@ export default function App() {
     Promise.all([
       storage.read<Config>("config"),
       storage.read<boolean>("prepared"),
+      storage.read<string>("pending-sos"),
     ])
-      .then(([c, prepared]) => {
+      .then(([c, prepared, savedRequest]) => {
+        setPending(Boolean(savedRequest));
         if (c) {
           setConfig(c);
           setUrl(c.url);
@@ -94,7 +102,7 @@ export default function App() {
   }, []);
 
   const sendPending = useCallback(async () => {
-    if (!config || sending.current) return;
+    if (!config || sending.current || !retry.current.permitted()) return;
     sending.current = true;
     try {
       const requestId = await storage.read<string>("pending-sos");
@@ -158,6 +166,7 @@ export default function App() {
     }, 5000);
     const listener = AppState.addEventListener("change", (state) => {
       if (state === "active") void refresh();
+      else retry.current.deny();
     });
     return () => {
       mounted = false;
@@ -167,7 +176,7 @@ export default function App() {
   }, [config, refresh]);
 
   useEffect(() => {
-    if (!activeId || !activeExpiresAt) return;
+    if (PREVIEW_MODE || !activeId || !activeExpiresAt) return;
     let subscription: Location.LocationSubscription | undefined,
       canceled = false;
     const start = async () => {
@@ -262,7 +271,9 @@ export default function App() {
     try {
       await api(config, "/api/profile", "PUT", profile);
       await storage.write("prepared", true);
-      const permission = await Location.requestForegroundPermissionsAsync();
+      const permission = PREVIEW_MODE
+        ? { status: "granted" }
+        : await Location.requestForegroundPermissionsAsync();
       setNotice(
         permission.status === "granted"
           ? "Location ready while the app is open."
@@ -277,6 +288,10 @@ export default function App() {
     }
   }
   async function backgroundPermission() {
+    if (PREVIEW_MODE) {
+      setNotice("Offline preview: no location permission is requested.");
+      return;
+    }
     try {
       Alert.alert(
         "Background location",
@@ -304,11 +319,13 @@ export default function App() {
     }
   }
   async function trigger() {
-    if (busy || pending || active) return;
+    if (busy || active) return;
     setBusy(true);
     setError("");
     try {
-      await storage.write("pending-sos", Crypto.randomUUID());
+      if (!(await storage.read<string>("pending-sos")))
+        await storage.write("pending-sos", Crypto.randomUUID());
+      retry.current.allow();
       setPending(true);
       await sendPending();
     } catch (e) {
@@ -322,7 +339,8 @@ export default function App() {
     setBusy(true);
     try {
       await api(config, `/api/incidents/${active.id}/end`, "POST");
-      await stopTracking();
+      if (!PREVIEW_MODE) await stopTracking();
+      retry.current.deny();
       setStatus((old) => (old ? { ...old, active: null } : old));
       setNotice(
         "Sharing ended. Existing texts cannot be recalled. This does not cancel an emergency-service response.",
@@ -350,388 +368,368 @@ export default function App() {
       </View>
     );
   return (
-    <KeyboardAvoidingView
-      style={s.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <StatusBar style="dark" />
-      <ScrollView
-        contentContainerStyle={s.page}
-        keyboardShouldPersistTaps="handled"
+    <SafeAreaView style={s.root}>
+      <KeyboardAvoidingView
+        style={s.root}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View style={s.top}>
-          <View>
-            <Text style={s.eyebrow}>YOUR PEOPLE. ONE SIGNAL.</Text>
-            <Text style={s.brand}>Women Safety</Text>
-          </View>
-          <Text style={s.version}>v0.2</Text>
-        </View>
-        <View style={s.banner}>
-          <Text style={s.bannerText}>
-            {!status
-              ? "CONNECTING · server mode is not yet confirmed"
-              : status.mode === "live"
-                ? "LIVE MODE · provider delivery is shown below"
-                : "TEST MODE · no texts or police alerts are sent"}
-          </Text>
-        </View>
-        {error ? (
-          <Text accessibilityRole="alert" style={s.error}>
-            {error}
-          </Text>
-        ) : null}
-        {!config || pairing ? (
-          <View style={s.card}>
-            <Text style={s.heading}>Connect your safety server</Text>
-            <Text style={s.body}>
-              Pair once using the private owner token generated by the backend.
-              Never share this token with emergency contacts.
-            </Text>
-            <Text style={s.label}>Server URL</Text>
-            <TextInput
-              accessibilityLabel="Server URL"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              value={url}
-              onChangeText={setUrl}
-              style={s.input}
-            />
-            <Text style={s.label}>Private owner token</Text>
-            <TextInput
-              accessibilityLabel="Private owner token"
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-              value={token}
-              onChangeText={setToken}
-              style={s.input}
-            />
-            {
-              <Action
-                title="Connect securely"
-                onPress={() => void pair()}
-                disabled={busy}
-              />
-            }
-            {config ? (
-              <Action
-                title="Back to SOS"
-                onPress={() => setPairing(false)}
-                secondary
-                disabled={busy}
-              />
-            ) : null}
-          </View>
-        ) : editing ? (
-          <View style={s.card}>
-            <Text style={s.heading}>Choose your safety circle</Text>
-            <Text style={s.body}>
-              Add up to six people or consenting support organisations. Use
-              international phone numbers, such as +919876543210.
-            </Text>
-            <Text style={s.label}>Your name</Text>
-            <TextInput
-              accessibilityLabel="Your name"
-              value={profile.name}
-              maxLength={80}
-              onChangeText={(name) => setProfile((p) => ({ ...p, name }))}
-              style={s.input}
-            />
-            {profile.contacts.map((contact, i) => (
-              <View style={s.contact} key={i}>
-                <Text style={s.label}>Contact {i + 1}</Text>
-                <TextInput
-                  accessibilityLabel={`Contact ${i + 1} name`}
-                  placeholder="Name"
-                  value={contact.name}
-                  maxLength={80}
-                  onChangeText={(name) => updateContact(i, { name })}
-                  style={s.input}
-                />
-                <TextInput
-                  accessibilityLabel={`Contact ${i + 1} phone`}
-                  placeholder="+ country code and number"
-                  keyboardType="phone-pad"
-                  value={contact.phone}
-                  onChangeText={(phone) => updateContact(i, { phone })}
-                  style={s.input}
-                />
-                {(["sms", "whatsapp"] as const).map((channel) => (
-                  <View key={channel} style={s.row}>
-                    <Text style={s.flex}>
-                      {channel === "sms" ? "Send SMS" : "Send WhatsApp"}
-                    </Text>
-                    <Switch
-                      accessibilityLabel={`Contact ${i + 1} ${channel}`}
-                      value={(contact.channels ?? ["sms"]).includes(channel)}
-                      onValueChange={(enabled) =>
-                        updateContact(i, {
-                          channels: enabled
-                            ? [...(contact.channels ?? ["sms"]), channel]
-                            : (contact.channels ?? ["sms"]).filter(
-                                (c) => c !== channel,
-                              ),
-                          ...(enabled ? { consentConfirmed: false } : {}),
-                        })
-                      }
-                    />
-                  </View>
-                ))}
-                <View style={s.row}>
-                  <Text style={s.flex}>
-                    This person agreed to receive SOS alerts through the
-                    selected channels
-                  </Text>
-                  <Switch
-                    accessibilityLabel={`Contact ${i + 1} consent`}
-                    value={contact.consentConfirmed}
-                    onValueChange={(consentConfirmed) =>
-                      updateContact(i, { consentConfirmed })
-                    }
-                  />
-                </View>
-                {profile.contacts.length > 1 ? (
-                  <Action
-                    title="Remove contact"
-                    onPress={() =>
-                      setProfile((p) => ({
-                        ...p,
-                        contacts: p.contacts.filter((_, j) => j !== i),
-                      }))
-                    }
-                    secondary
-                    disabled={busy}
-                  />
-                ) : null}
-              </View>
-            ))}
-            {profile.contacts.length < 6 ? (
-              <Action
-                title="+ Add another contact"
-                onPress={() =>
-                  setProfile((p) => ({
-                    ...p,
-                    contacts: [...p.contacts, blankContact()],
-                  }))
-                }
-                secondary
-                disabled={busy}
-              />
-            ) : null}
-            <View style={s.row}>
-              <Text style={s.flex}>Also alert a connected police partner</Text>
-              <Switch
-                accessibilityLabel="Alert a connected police partner"
-                value={profile.policeEnabled}
-                onValueChange={(policeEnabled) =>
-                  setProfile((p) => ({ ...p, policeEnabled }))
-                }
-              />
+        <StatusBar style="dark" />
+        <ScrollView
+          contentContainerStyle={s.page}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={s.top}>
+            <View>
+              <Text style={s.brand}>Women Safety</Text>
             </View>
-            <Text style={s.caption}>
-              Requires a consenting agency connection and location. Nearby
-              stations are not automatically connected.
-            </Text>
-            {
-              <Action
-                title="Save contacts & prepare location"
-                onPress={() => void saveProfile()}
-                disabled={busy}
-              />
-            }
-            {status?.profile ? (
-              <Action
-                title="Back to SOS"
-                onPress={() => setEditing(false)}
-                secondary
-                disabled={busy}
-              />
-            ) : null}
-          </View>
-        ) : (
-          <>
-            <Text style={s.hero}>
-              {active
-                ? "Your SOS is active."
-                : pending
-                  ? "Connecting your SOS…"
-                  : "Help starts with\none tap."}
-            </Text>
-            <Text style={s.body}>
-              {active
-                ? "Check the delivery status for each contact. An active SOS does not confirm that help is on the way."
-                : pending
-                  ? "The request is saved on this phone. Keep the app open to retry. Nobody is confirmed alerted yet."
-                  : "Your selected people receive coordinates, a map link, and a private live-location link through their selected channels."}
-            </Text>
-            {!active ? (
+            {config && !pairing ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={
-                  status?.mode === "test"
-                    ? "Activate test SOS"
-                    : "Activate SOS immediately"
-                }
-                disabled={busy || pending}
-                onPress={() => void trigger()}
-                style={[s.sos, (busy || pending) && s.disabled]}
+                accessibilityLabel={editing ? "Back to SOS" : "Settings"}
+                disabled={busy || Boolean(active) || pending}
+                onPress={() => {
+                  setProfile(status?.profile ?? emptyProfile);
+                  setEditing(!editing);
+                }}
+                hitSlop={8}
               >
-                <Text style={s.sosTitle}>{pending ? "SENDING" : "SOS"}</Text>
-                <Text style={s.sosSubtitle}>
-                  {status?.mode === "test"
-                    ? "TAP TO TEST"
-                    : "TAP TO SEND HELP REQUEST"}
+                <Text style={s.settingsLink}>
+                  {editing ? "Back" : "Settings"}
                 </Text>
               </Pressable>
             ) : null}
-            {pending ? (
-              <Action
-                title="Stop retrying this request"
-                onPress={() =>
-                  Alert.alert(
-                    "Stop local retries?",
-                    "The server may already have received this SOS. Stopping retries does not recall messages or end an existing alert. Reconnect to check its status.",
-                    [
-                      { text: "Keep retrying", style: "cancel" },
-                      {
-                        text: "Stop retries",
-                        onPress: () => {
-                          void storage
-                            .remove("pending-sos")
-                            .then(() => {
-                              setPending(false);
-                              setError(
-                                "Retries stopped. Reconnect to check whether the server received the SOS.",
-                              );
-                            })
-                            .catch((e) => setError(message(e)));
-                        },
-                      },
-                    ],
-                  )
-                }
-                secondary
-                disabled={busy}
-              />
-            ) : null}
+          </View>
+          <View style={s.banner}>
+            <Text style={s.bannerText}>
+              {PREVIEW_MODE
+                ? "OFFLINE PREVIEW · NO ALERTS CAN BE SENT"
+                : !status
+                  ? "Connecting to your safety service…"
+                  : status.mode === "live"
+                    ? "Live mode"
+                    : "Test mode · nothing will be sent"}
+            </Text>
+          </View>
+          {error ? (
+            <Text accessibilityRole="alert" style={s.error}>
+              {error}
+            </Text>
+          ) : null}
+          {!config || pairing ? (
             <View style={s.card}>
-              <Text style={s.heading}>
-                {active ? "Alert status" : "Ready check"}
+              <Text style={s.heading}>Connect your safety server</Text>
+              <Text style={s.body}>
+                Pair once using the private owner token generated by the
+                backend. Never share this token with emergency contacts.
               </Text>
-              <Text style={s.item}>
-                {status?.profile?.contacts.length ?? 0} selected emergency
-                contacts
+              <Text style={s.label}>Server URL</Text>
+              <TextInput
+                accessibilityLabel="Server URL"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                value={url}
+                onChangeText={setUrl}
+                style={s.input}
+              />
+              <Text style={s.label}>Private owner token</Text>
+              <TextInput
+                accessibilityLabel="Private owner token"
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                value={token}
+                onChangeText={setToken}
+                style={s.input}
+              />
+              {
+                <Action
+                  title="Connect securely"
+                  onPress={() => void pair()}
+                  disabled={busy}
+                />
+              }
+              {config ? (
+                <Action
+                  title="Back to SOS"
+                  onPress={() => setPairing(false)}
+                  secondary
+                  disabled={busy}
+                />
+              ) : null}
+            </View>
+          ) : editing ? (
+            <View style={s.card}>
+              <Text style={s.heading}>Choose your safety circle</Text>
+              <Text style={s.body}>
+                Add up to six people or consenting support organisations. Use
+                international phone numbers, such as +919876543210.
               </Text>
-              <Text style={s.item}>
-                SMS:{" "}
-                {status?.smsConfigured ? "provider connected" : "not connected"}
-              </Text>
-              <Text style={s.item}>
-                WhatsApp:{" "}
-                {status?.whatsappConfigured
-                  ? "provider and template configured"
-                  : "not connected"}
-              </Text>
-              <Text style={s.item}>
-                Voice: Pipecat local prototype · telephone calls not connected
-              </Text>
-              <Text style={s.item}>
-                Police:{" "}
-                {!status?.profile?.policeEnabled
-                  ? "not selected"
-                  : status?.policeConfigured
-                    ? "partner configured; see submission status"
-                    : "not connected · no agency can be alerted"}
-              </Text>
-              {active ? (
-                <>
-                  <Text style={s.item}>
-                    Location:{" "}
-                    {active.location
-                      ? `${Math.max(0, Math.floor((now - active.location.timestamp) / 1000))} seconds old · ±${Math.round(active.location.accuracy)}m`
-                      : "waiting for a fix"}
-                  </Text>
-                  {active.jobs.map((job) => (
-                    <View key={job.id} style={s.delivery}>
-                      <Text style={s.label}>
-                        {job.name}
-                        {job.kind === "police"
-                          ? " · police partner"
-                          : ` · ${job.kind === "whatsapp" ? "WhatsApp" : "SMS"}${job.phase === "location" ? " · location update" : ""}`}
+              <Text style={s.label}>Your name</Text>
+              <TextInput
+                accessibilityLabel="Your name"
+                value={profile.name}
+                maxLength={80}
+                onChangeText={(name) => setProfile((p) => ({ ...p, name }))}
+                style={s.input}
+              />
+              {profile.contacts.map((contact, i) => (
+                <View style={s.contact} key={i}>
+                  <Text style={s.label}>Contact {i + 1}</Text>
+                  <TextInput
+                    accessibilityLabel={`Contact ${i + 1} name`}
+                    placeholder="Name"
+                    value={contact.name}
+                    maxLength={80}
+                    onChangeText={(name) => updateContact(i, { name })}
+                    style={s.input}
+                  />
+                  <TextInput
+                    accessibilityLabel={`Contact ${i + 1} phone`}
+                    placeholder="+ country code and number"
+                    keyboardType="phone-pad"
+                    value={contact.phone}
+                    onChangeText={(phone) => updateContact(i, { phone })}
+                    style={s.input}
+                  />
+                  {(["sms", "whatsapp"] as const).map((channel) => (
+                    <View key={channel} style={s.row}>
+                      <Text style={s.flex}>
+                        {channel === "sms" ? "Send SMS" : "Send WhatsApp"}
                       </Text>
-                      <Text style={s.caption}>
-                        {labels[job.status] ?? job.status}
-                      </Text>
+                      <Switch
+                        accessibilityLabel={`Contact ${i + 1} ${channel}`}
+                        value={(contact.channels ?? ["sms"]).includes(channel)}
+                        onValueChange={(enabled) =>
+                          updateContact(i, {
+                            channels: enabled
+                              ? [...(contact.channels ?? ["sms"]), channel]
+                              : (contact.channels ?? ["sms"]).filter(
+                                  (c) => c !== channel,
+                                ),
+                            ...(enabled ? { consentConfirmed: false } : {}),
+                          })
+                        }
+                      />
                     </View>
                   ))}
-                  {!active.jobs.some((j) => j.kind === "police") &&
-                  status?.profile?.policeEnabled ? (
-                    <Text style={s.error}>
-                      No police alert submitted. Waiting for location or a
-                      configured station in range.
+                  <View style={s.row}>
+                    <Text style={s.flex}>
+                      This person agreed to receive SOS alerts through the
+                      selected channels
                     </Text>
-                  ) : null}
-                  {
+                    <Switch
+                      accessibilityLabel={`Contact ${i + 1} consent`}
+                      value={contact.consentConfirmed}
+                      onValueChange={(consentConfirmed) =>
+                        updateContact(i, { consentConfirmed })
+                      }
+                    />
+                  </View>
+                  {profile.contacts.length > 1 ? (
                     <Action
-                      title="End location sharing"
+                      title="Remove contact"
                       onPress={() =>
-                        Alert.alert(
-                          "End sharing?",
-                          "This revokes the link. Texts already submitted cannot be recalled, and this does not cancel any emergency response.",
-                          [
-                            { text: "Keep sharing", style: "cancel" },
-                            { text: "End sharing", onPress: () => void end() },
-                          ],
-                        )
+                        setProfile((p) => ({
+                          ...p,
+                          contacts: p.contacts.filter((_, j) => j !== i),
+                        }))
                       }
                       secondary
                       disabled={busy}
                     />
+                  ) : null}
+                </View>
+              ))}
+              {profile.contacts.length < 6 ? (
+                <Action
+                  title="+ Add another contact"
+                  onPress={() =>
+                    setProfile((p) => ({
+                      ...p,
+                      contacts: [...p.contacts, blankContact()],
+                    }))
                   }
-                </>
-              ) : (
-                <>
-                  {
-                    <Action
-                      title="Edit emergency contacts"
-                      onPress={() => {
-                        setProfile(status?.profile ?? emptyProfile);
-                        setEditing(true);
-                      }}
-                      secondary
-                      disabled={busy || pending}
-                    />
+                  secondary
+                  disabled={busy}
+                />
+              ) : null}
+              <View style={s.row}>
+                <Text style={s.flex}>
+                  Also alert a connected police partner
+                </Text>
+                <Switch
+                  accessibilityLabel="Alert a connected police partner"
+                  value={profile.policeEnabled}
+                  onValueChange={(policeEnabled) =>
+                    setProfile((p) => ({ ...p, policeEnabled }))
                   }
-                  {
-                    <Action
-                      title="Enable background location"
-                      onPress={() => void backgroundPermission()}
-                      secondary
-                      disabled={busy || pending}
-                    />
-                  }
-                  {
-                    <Action
-                      title="Server settings"
-                      onPress={() => setPairing(true)}
-                      secondary
-                      disabled={busy || pending}
-                    />
-                  }
-                </>
-              )}
+                />
+              </View>
+              <Text style={s.caption}>
+                Requires a consenting agency connection and location. Nearby
+                stations are not automatically connected.
+              </Text>
+              <Text style={s.caption}>
+                SMS: {status?.smsConfigured ? "configured" : "not connected"} ·
+                WhatsApp:{" "}
+                {status?.whatsappConfigured ? "configured" : "not connected"} ·
+                Police:{" "}
+                {status?.policeConfigured
+                  ? "partner configured"
+                  : "not connected"}
+                . Telephone calls are not connected.
+              </Text>
+              <Action
+                title="Location permissions"
+                onPress={() => void backgroundPermission()}
+                secondary
+                disabled={busy}
+              />
+              <Action
+                title="Server settings"
+                onPress={() => setPairing(true)}
+                secondary
+                disabled={busy || PREVIEW_MODE}
+              />
+              {
+                <Action
+                  title="Save contacts & prepare location"
+                  onPress={() => void saveProfile()}
+                  disabled={busy}
+                />
+              }
+              {status?.profile ? (
+                <Action
+                  title="Back to SOS"
+                  onPress={() => setEditing(false)}
+                  secondary
+                  disabled={busy}
+                />
+              ) : null}
             </View>
-          </>
-        )}
-        {notice ? <Text style={s.notice}>{notice}</Text> : null}
-        <Text style={s.footer}>
-          Early development release. Internet and server access are required.
-          Phone shutdown, permissions, and OS restrictions can interrupt
-          tracking. This app does not guarantee delivery or emergency response.
-        </Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          ) : (
+            <View style={s.home}>
+              <Text style={s.homeTitle}>
+                {active
+                  ? PREVIEW_MODE
+                    ? "Practice complete"
+                    : "SOS active"
+                  : pending
+                    ? "Unconfirmed SOS saved"
+                    : "Here when you need help."}
+              </Text>
+              <Text style={s.homeSubtitle}>
+                {active
+                  ? PREVIEW_MODE
+                    ? "Nothing was sent. No location was accessed."
+                    : "Check delivery below. Help is not yet confirmed."
+                  : pending
+                    ? "Hold to resume the same request. Opening the app does not resend it."
+                    : PREVIEW_MODE
+                      ? "3 sample contacts · offline preview"
+                      : `${status?.profile?.contacts.length ?? 0} selected contacts · SMS & WhatsApp`}
+              </Text>
+              {!active ? (
+                <SosButton
+                  onActivate={() => void trigger()}
+                  disabled={busy}
+                  pending={pending}
+                  preview={PREVIEW_MODE || status?.mode === "test"}
+                />
+              ) : (
+                <View style={s.activeCircle}>
+                  <Text style={s.activeLabel}>
+                    {PREVIEW_MODE ? "TESTED" : "ACTIVE"}
+                  </Text>
+                </View>
+              )}
+              {!PREVIEW_MODE &&
+              !active &&
+              status?.mode === "live" &&
+              (!status.smsConfigured || !status.whatsappConfigured) ? (
+                <Text style={s.error}>
+                  Some delivery channels are not connected. Check Settings.
+                </Text>
+              ) : null}
+              {active ? (
+                <>
+                  <Action
+                    title={
+                      details ? "Hide delivery status" : "View delivery status"
+                    }
+                    onPress={() => setDetails((v) => !v)}
+                    secondary
+                  />
+                  {details ? (
+                    <View style={s.card}>
+                      <Text style={s.heading}>Delivery status</Text>
+                      <Text style={s.item}>
+                        Location:{" "}
+                        {active.location
+                          ? `${Math.max(0, Math.floor((now - active.location.timestamp) / 1000))} seconds old · ±${Math.round(active.location.accuracy)}m`
+                          : PREVIEW_MODE
+                            ? "not accessed in this preview"
+                            : "waiting for a fix"}
+                      </Text>
+                      {active.jobs.map((job) => (
+                        <View key={job.id} style={s.delivery}>
+                          <Text style={s.label}>
+                            {job.name} ·{" "}
+                            {job.kind === "whatsapp"
+                              ? "WhatsApp"
+                              : job.kind === "police"
+                                ? "police partner"
+                                : "SMS"}
+                          </Text>
+                          <Text style={s.caption}>
+                            {labels[job.status] ?? job.status}
+                          </Text>
+                        </View>
+                      ))}
+                      {!active.jobs.some((j) => j.kind === "police") &&
+                      status?.profile?.policeEnabled ? (
+                        <Text style={s.error}>No police alert submitted.</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  <Action
+                    title={
+                      PREVIEW_MODE ? "Back to practice" : "End location sharing"
+                    }
+                    onPress={() =>
+                      PREVIEW_MODE
+                        ? void end()
+                        : Alert.alert(
+                            "End sharing?",
+                            "This revokes the private link. It cannot recall texts or cancel an emergency response.",
+                            [
+                              { text: "Keep sharing", style: "cancel" },
+                              {
+                                text: "End sharing",
+                                onPress: () => void end(),
+                              },
+                            ],
+                          )
+                    }
+                    secondary
+                    disabled={busy}
+                  />
+                </>
+              ) : null}
+            </View>
+          )}
+          {notice && (editing || active) ? (
+            <Text style={s.notice}>{notice}</Text>
+          ) : null}
+          <Text style={s.footer}>
+            {PREVIEW_MODE
+              ? "Safe to try · no calls, messages, or GPS access."
+              : "Development version · delivery is not guaranteed."}
+          </Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -759,7 +757,33 @@ function Action({
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#eef3ef" },
+  root: { flex: 1, backgroundColor: "#fafaf7" },
+  settingsLink: { fontSize: 14, color: "#4a5e53", padding: 10 },
+  home: { flex: 1, justifyContent: "center", gap: 14, paddingVertical: 28 },
+  homeTitle: {
+    fontSize: 25,
+    fontWeight: "600",
+    color: "#243b30",
+    textAlign: "center",
+    letterSpacing: -0.7,
+  },
+  homeSubtitle: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: "#68736b",
+    textAlign: "center",
+  },
+  activeCircle: {
+    width: 260,
+    aspectRatio: 1,
+    borderRadius: 150,
+    backgroundColor: "#e4eee7",
+    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 28,
+  },
+  activeLabel: { color: "#245039", fontSize: 36, fontWeight: "700" },
   loading: {
     flex: 1,
     alignItems: "center",
@@ -769,9 +793,10 @@ const s = StyleSheet.create({
   },
   page: {
     padding: 24,
-    paddingTop: 64,
-    paddingBottom: 48,
-    maxWidth: 620,
+    paddingTop: 20,
+    paddingBottom: 24,
+    flexGrow: 1,
+    maxWidth: 460,
     width: "100%",
     alignSelf: "center",
     gap: 18,
@@ -895,5 +920,10 @@ const s = StyleSheet.create({
     lineHeight: 22,
   },
   notice: { color: "#345746", fontSize: 13, lineHeight: 21 },
-  footer: { color: "#66766d", fontSize: 12, lineHeight: 20, marginTop: 8 },
+  footer: {
+    color: "#707971",
+    fontSize: 11,
+    lineHeight: 18,
+    textAlign: "center",
+  },
 });

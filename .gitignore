@@ -15,3 +15,6 @@ mobile/ios/
 __pycache__/
 *.pyc
 .models/
+
+mobile/dist-preview/
+mobile/apk-info.txt

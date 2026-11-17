@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { PREVIEW_MODE, previewApi, previewStorage } from "./preview";
 export type Config = { url: string; token: string };
 export type Contact = {
   name: string;
@@ -18,6 +19,7 @@ export type Fix = {
   timestamp: number;
 };
 export type Incident = {
+  mode?: "test" | "live";
   id: string;
   status: "active" | "ended" | "expired";
   expiresAt: number;
@@ -42,15 +44,24 @@ export type Status = {
 };
 export const storage = {
   async read<T>(key: string): Promise<T | null> {
+    if (PREVIEW_MODE) return previewStorage.read<T>(key);
     const value = await SecureStore.getItemAsync(key);
     return value ? (JSON.parse(value) as T) : null;
   },
   async write(key: string, value: unknown) {
+    if (PREVIEW_MODE) {
+      previewStorage.write(key, value);
+      return;
+    }
     await SecureStore.setItemAsync(key, JSON.stringify(value), {
       keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
     });
   },
   async remove(key: string) {
+    if (PREVIEW_MODE) {
+      previewStorage.remove(key);
+      return;
+    }
     await SecureStore.deleteItemAsync(key);
   },
 };
@@ -60,6 +71,7 @@ export async function api<T>(
   method = "GET",
   data?: unknown,
 ): Promise<T> {
+  if (PREVIEW_MODE) return previewApi<T>(path, method, data);
   const controller = new AbortController(),
     timer = setTimeout(() => controller.abort(), 12000);
   try {

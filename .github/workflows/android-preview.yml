@@ -1,0 +1,49 @@
+name: Build offline Android preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPO_PUBLIC_PREVIEW_MODE: "true"
+      CI: "1"
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - run: npm ci
+      - run: npx expo prebuild --platform android --no-install
+      - name: Build standalone ARM64 preview APK
+        run: ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2
+        working-directory: mobile/android
+      - name: Verify install identity and blocked permissions
+        run: |
+          aapt_bin=$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)
+          "$aapt_bin" dump badging android/app/build/outputs/apk/release/app-release.apk > apk-info.txt
+          grep "package: name='org.womensafety.sos.preview'" apk-info.txt
+          grep 'launchable-activity:' apk-info.txt
+          if grep -E "uses-permission:.*android.permission.(INTERNET|ACCESS_FINE_LOCATION|ACCESS_COARSE_LOCATION|ACCESS_BACKGROUND_LOCATION|SEND_SMS|CALL_PHONE|RECORD_AUDIO)'" apk-info.txt; then
+            echo 'Preview must not have network, location, SMS, call, or microphone permissions.'
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: women-safety-offline-preview-arm64
+          path: |
+            mobile/android/app/build/outputs/apk/release/app-release.apk
+            mobile/apk-info.txt
+          if-no-files-found: error
