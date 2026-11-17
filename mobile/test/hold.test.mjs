@@ -94,3 +94,19 @@ test("saved requests need fresh authorization after launch or backgrounding", ()
   const relaunched = createRetryAuthorization();
   assert.equal(relaunched.permitted(), false);
 });
+
+test("an accepted SOS remains visible after an earlier status connection failure", async () => {
+  const { withAcceptedIncident } = await import("../src/safety/state.ts");
+  const incident = {
+    id: "test",
+    mode: "live",
+    status: "active",
+    expiresAt: Date.now() + 10000,
+    location: null,
+    jobs: [],
+  };
+  const state = withAcceptedIncident(null, incident);
+  assert.equal(state.active.id, "test");
+  assert.equal(state.mode, "live");
+  assert.equal(state.smsConfigured, false); // Unknown provider readiness is never invented.
+});

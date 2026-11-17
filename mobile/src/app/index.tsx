@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { SosButton } from "../components/SosButton";
 import { PREVIEW_MODE } from "../preview";
 import { createRetryAuthorization } from "../safety/hold";
+import { withAcceptedIncident } from "../safety/state";
 import * as Crypto from "expo-crypto";
 import * as Location from "expo-location";
 import {
@@ -113,11 +114,7 @@ export default function App() {
       });
       await storage.remove("pending-sos");
       setPending(false);
-      setStatus((old) =>
-        old
-          ? { ...old, active: incident.status === "active" ? incident : null }
-          : old,
-      );
+      setStatus((old) => withAcceptedIncident(old, incident));
       setError("");
     } catch (e) {
       setError(
@@ -628,7 +625,7 @@ export default function App() {
                     ? "Hold to resume the same request. Opening the app does not resend it."
                     : PREVIEW_MODE
                       ? "3 sample contacts · offline preview"
-                      : `${status?.profile?.contacts.length ?? 0} selected contacts · SMS & WhatsApp`}
+                      : `${status?.profile?.contacts.length ?? 0} selected emergency contacts`}
               </Text>
               {!active ? (
                 <SosButton
@@ -651,6 +648,25 @@ export default function App() {
                 <Text style={s.error}>
                   Some delivery channels are not connected. Check Settings.
                 </Text>
+              ) : null}
+              {pending && !active ? (
+                <Action
+                  title="Stop local retries"
+                  onPress={() => {
+                    retry.current.deny();
+                    void storage
+                      .remove("pending-sos")
+                      .then(() => {
+                        setPending(false);
+                        setError(
+                          "Retries stopped. The server may already have received the SOS; reconnect to check its status.",
+                        );
+                      })
+                      .catch((e) => setError(message(e)));
+                  }}
+                  secondary
+                  disabled={busy}
+                />
               ) : null}
               {active ? (
                 <>
