@@ -2,6 +2,8 @@
 
 Women Safety uses one Expo/React Native codebase for Android and iOS: the same SOS screen, safety circle, native permission prompts, optional evidence controls, and encrypted-backend/private-link flow. No App Store submission is required by this repository. The default downloadable previews are offline simulations and never send emergency alerts.
 
+The compiled 0.4.1 iPhone/iPad preview requires **iOS/iPadOS 16.4 or newer**, as verified from the built app’s `MinimumOSVersion`.
+
 ## GitHub downloads
 
 Open [Build iOS previews](https://github.com/sharvinhariharan-hub/women-safety-software/actions/workflows/ios-preview.yml), choose a successful run, and download an artifact:
