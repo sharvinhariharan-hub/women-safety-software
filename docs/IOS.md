@@ -48,3 +48,5 @@ References: [Apple Personal Team limits](https://developer.apple.com/help/accoun
 ## Current dependency-audit finding
 
 On 18 November 2026, the shared CI dependency audit reports [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), a high-severity ReDoS finding affecting Picomatch through 4.0.7. The current upstream release is 4.0.7 and the advisory lists no patched version. Picomatch occurs in the Expo/Metro/lint tooling dependency tree. SOS profile and location endpoints do not accept glob patterns. This is not a claim that the issue is universally harmless: the audit remains enabled and failing until the dependency is fixed or formally reviewed. Native compilation and the isolated functional tests are reported separately from that audit result.
+
+Version 0.4.1 preserves native evidence formats: QuickTime MOV on iOS, MP4 on Android. Saved-clip listing and export use the corresponding MIME type and Apple UTI; recordings are not converted or silently renamed across containers.

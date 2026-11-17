@@ -16,6 +16,7 @@ import { CameraView, Camera } from "expo-camera";
 import { Directory, File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { api, Config, Status, storage } from "../api";
+import { evidenceFormat } from "../safety/evidence";
 import { PREVIEW_MODE } from "../preview";
 
 type Clip = { uri: string; name: string };
@@ -35,7 +36,9 @@ export default function Evidence() {
     if (!folder.exists) return;
     const saved = folder
       .list()
-      .filter((f): f is File => f instanceof File && f.name.endsWith(".mp4"));
+      .filter(
+        (f): f is File => f instanceof File && /\.(mp4|mov)$/i.test(f.name),
+      );
     setClips(
       saved
         .map((f) => ({ uri: f.uri, name: f.name }))
@@ -120,7 +123,8 @@ export default function Evidence() {
       const folder = new Directory(Paths.document, "evidence");
       folder.create({ intermediates: true, idempotent: true });
       const file = new File(result.uri);
-      const target = new File(folder, `SOS-${Date.now()}.mp4`);
+      const format = evidenceFormat(result.uri);
+      const target = new File(folder, `SOS-${Date.now()}.${format.extension}`);
       file.copy(target);
       if (mounted.current) {
         reload();
@@ -148,10 +152,8 @@ export default function Evidence() {
     try {
       if (!(await Sharing.isAvailableAsync()))
         throw new Error("Sharing is not available on this device.");
-      await Sharing.shareAsync(uri, {
-        mimeType: "video/mp4",
-        UTI: "public.mpeg-4",
-      });
+      const { mimeType, UTI } = evidenceFormat(uri);
+      await Sharing.shareAsync(uri, { mimeType, UTI });
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Export failed");
     }

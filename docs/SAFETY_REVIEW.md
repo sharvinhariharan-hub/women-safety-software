@@ -58,3 +58,5 @@ Automated permission tests cover preview isolation, camera denial preventing the
 The repository now includes separate native iOS Simulator and unsigned iPhone/iPad compilation jobs in addition to Android. The unsigned IPA is explicitly marked as requiring Apple signing/provisioning; no App Store submission is configured. [IOS.md](IOS.md) documents personal Xcode testing and ad hoc installation without an App Store listing. Native compilation does not replace real-phone testing.
 
 The dependency audit now reports unpatched upstream Picomatch advisory [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) through the build-tool dependency chain. The audit gate remains enabled. Earlier zero-finding audit results describe their original test dates and do not establish the current dependency status.
+
+Version 0.4.1 corrects iOS evidence storage/export to preserve MOV instead of relabelling it as MP4. Isolated format tests cover iOS MOV, Android MP4, case/query handling, and explicit rejection of unknown containers. Native camera recording itself remains a physical-device acceptance item.
