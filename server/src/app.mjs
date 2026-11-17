@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Store, hash } from "./store.mjs";
 import { providers, nearestStation } from "./providers.mjs";
+import { notification, reverseGeocode } from "./notifications.mjs";
 
 const fail = (status, message) => {
   throw Object.assign(new Error(message), { status });
@@ -65,6 +66,9 @@ export function createApp(config, injected = {}) {
   const capabilities = () => ({
     mode: config.mode,
     smsConfigured: transport.smsConfigured,
+    whatsappConfigured: Boolean(transport.whatsappConfigured),
+    voiceEngine: "pipecat",
+    voiceCallingConfigured: false,
     policeConfigured: Boolean(
       config.policeToken && registry.some((s) => s.consentConfirmed === true),
     ),
@@ -77,10 +81,11 @@ export function createApp(config, injected = {}) {
       requestId: undefined,
       jobs: store
         .jobs(incident.id)
-        .map(({ id, name, kind, status, updatedAt }) => ({
+        .map(({ id, name, kind, phase, status, updatedAt }) => ({
           id,
           name,
           kind,
+          phase,
           status,
           updatedAt,
         })),
@@ -112,6 +117,44 @@ export function createApp(config, injected = {}) {
       },
     });
   }
+  function jobStatus(kind) {
+    if (config.mode === "test") return "test_only";
+    const configured =
+      kind === "sms" ? transport.smsConfigured : transport.whatsappConfigured;
+    return configured ? "pending" : "not_configured";
+  }
+  function addLocationNotifications(incident) {
+    if (
+      !incident.location ||
+      incident.status !== "active" ||
+      incident.expiresAt <= Date.now() ||
+      (incident.mode && incident.mode !== config.mode)
+    )
+      return;
+    const jobs = store.jobs(incident.id);
+    for (const initial of jobs) {
+      if (
+        !["sms", "whatsapp"].includes(initial.kind) ||
+        initial.phase !== "sos" ||
+        initial.containsLocation !== false ||
+        !["submitted", "delivered", "unknown", "test_only"].includes(
+          initial.status,
+        )
+      )
+        continue;
+      if (jobs.some((job) => job.sourceJobId === initial.id)) continue;
+      const id = randomUUID();
+      store.job(id, incident.id, initial.kind, {
+        name: initial.name,
+        address: initial.address,
+        phase: "location",
+        sourceJobId: initial.id,
+        status: jobStatus(initial.kind),
+        updatedAt: Date.now(),
+        ...notification(incident, config.publicUrl, "location"),
+      });
+    }
+  }
   async function work() {
     if (working) return;
     working = true;
@@ -125,12 +168,29 @@ export function createApp(config, injected = {}) {
         }
         if (now >= incident.expiresAt + 86400000) store.purge(incident.id);
       }
+      for (const incident of store.incidents())
+        addLocationNotifications(incident);
+      const placeLookups = new Map();
+      const placeFor = (incident) => {
+        if (config.mode === "test" || !incident.location || !config.geocoderUrl)
+          return Promise.resolve(null);
+        if (incident.location.placeName)
+          return Promise.resolve(incident.location.placeName);
+        const key = `${incident.id}:${incident.location.timestamp}`;
+        if (!placeLookups.has(key))
+          placeLookups.set(
+            key,
+            reverseGeocode(incident.location, config.geocoderUrl),
+          );
+        return placeLookups.get(key);
+      };
       await Promise.allSettled(
         store.jobs().map(async (job) => {
           const incident = store.get(`incident:${job.incident}`);
           if (
             !incident ||
             incident.status !== "active" ||
+            (incident.mode && incident.mode !== config.mode) ||
             incident.expiresAt <= Date.now()
           ) {
             if (job.status === "pending")
@@ -143,7 +203,7 @@ export function createApp(config, injected = {}) {
           }
           if (
             job.status === "submitted" &&
-            job.kind === "sms" &&
+            ["sms", "whatsapp"].includes(job.kind) &&
             job.reference &&
             now - job.updatedAt >= 30000
           ) {
@@ -160,6 +220,35 @@ export function createApp(config, injected = {}) {
             return;
           }
           if (job.status !== "pending") return;
+          if (["sms", "whatsapp"].includes(job.kind)) {
+            const place = await placeFor(incident);
+            const current = store.get(`incident:${job.incident}`);
+            if (
+              !current ||
+              current.status !== "active" ||
+              current.expiresAt <= Date.now()
+            )
+              return;
+            if (
+              place &&
+              current.location &&
+              current.location.timestamp === incident.location?.timestamp
+            ) {
+              current.location.placeName = place;
+              store.set(`incident:${current.id}`, current);
+            }
+            Object.assign(
+              job,
+              notification(
+                current,
+                config.publicUrl,
+                job.phase,
+                current.location?.timestamp === incident.location?.timestamp
+                  ? place
+                  : null,
+              ),
+            );
+          }
           store.job(job.id, job.incident, job.kind, {
             ...job,
             status: "submitting",
@@ -168,7 +257,9 @@ export function createApp(config, injected = {}) {
           try {
             const result = await (job.kind === "sms"
               ? transport.sms(job)
-              : transport.police(job));
+              : job.kind === "whatsapp"
+                ? transport.whatsapp(job)
+                : transport.police(job));
             store.job(job.id, job.incident, job.kind, {
               ...job,
               ...result,
@@ -255,7 +346,7 @@ export function createApp(config, injected = {}) {
           location: incident.location,
           startedAt: incident.createdAt,
           expiresAt: incident.expiresAt,
-          mode: config.mode,
+          mode: incident.mode ?? config.mode,
         });
       }
       const supplied = req.headers.authorization?.replace(/^Bearer /, "") ?? "";
@@ -294,11 +385,21 @@ export function createApp(config, injected = {}) {
               400,
               "Contacts must be unique international numbers with confirmed consent",
             );
+          const channels = c.channels ?? ["sms"];
+          if (
+            !Array.isArray(channels) ||
+            channels.length < 1 ||
+            channels.length > 2 ||
+            new Set(channels).size !== channels.length ||
+            channels.some((channel) => !["sms", "whatsapp"].includes(channel))
+          )
+            fail(400, "Select SMS, WhatsApp, or both for each contact");
           numbers.add(c.phone);
           return {
             name: c.name.trim(),
             phone: c.phone,
             consentConfirmed: true,
+            channels,
           };
         });
         store.set("profile", {
@@ -331,6 +432,7 @@ export function createApp(config, injected = {}) {
           requestId: input.requestId,
           shareToken: randomBytes(32).toString("hex"),
           name: profile.name,
+          mode: config.mode,
           policeEnabled: profile.policeEnabled,
           status: "active",
           location,
@@ -340,19 +442,17 @@ export function createApp(config, injected = {}) {
         store.transaction(() => {
           store.set(`incident:${incident.id}`, incident);
           for (const contact of profile.contacts) {
-            const id = randomUUID();
-            store.job(id, incident.id, "sms", {
-              name: contact.name,
-              address: contact.phone,
-              status:
-                config.mode === "test"
-                  ? "test_only"
-                  : transport.smsConfigured
-                    ? "pending"
-                    : "not_configured",
-              updatedAt: now,
-              message: `${profile.name} needs your help. An SOS was activated. Live location (may initially be unavailable): ${config.publicUrl}/track#${incident.shareToken} . If safe, contact them and local emergency services. Link expires in 24 hours.`,
-            });
+            for (const channel of contact.channels ?? ["sms"]) {
+              const id = randomUUID();
+              store.job(id, incident.id, channel, {
+                name: contact.name,
+                address: contact.phone,
+                phase: "sos",
+                status: jobStatus(channel),
+                updatedAt: now,
+                ...notification(incident, config.publicUrl),
+              });
+            }
           }
           addPolice(incident);
         });
@@ -361,12 +461,27 @@ export function createApp(config, injected = {}) {
         return;
       }
       const match = path.match(
-        /^\/api\/incidents\/([a-f0-9-]{36})(\/location|\/end)?$/i,
+        /^\/api\/incidents\/([a-f0-9-]{36})(\/location|\/end|\/voice-brief)?$/i,
       );
       if (match) {
         const incident = store.get(`incident:${match[1]}`);
         if (!incident) fail(404, "Incident unavailable");
         if (req.method === "GET" && !match[2]) return send(200, view(incident));
+        if (req.method === "GET" && match[2] === "/voice-brief") {
+          if (incident.status !== "active" || incident.expiresAt <= now)
+            fail(410, "Sharing has ended or expired");
+          return send(200, {
+            incidentId: incident.id,
+            name: incident.name,
+            mode: incident.mode ?? config.mode,
+            status: incident.status,
+            location: incident.location,
+            createdAt: incident.createdAt,
+            expiresAt: incident.expiresAt,
+            issue:
+              "SOS activated; police assistance requested. The nature of the incident and people involved are unknown.",
+          });
+        }
         if (req.method === "POST" && match[2] === "/end") {
           incident.status = "ended";
           incident.location = null;

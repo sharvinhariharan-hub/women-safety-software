@@ -4,6 +4,7 @@ export type Contact = {
   name: string;
   phone: string;
   consentConfirmed: boolean;
+  channels?: ("sms" | "whatsapp")[];
 };
 export type Profile = {
   name: string;
@@ -21,11 +22,20 @@ export type Incident = {
   status: "active" | "ended" | "expired";
   expiresAt: number;
   location: Fix | null;
-  jobs: { id: string; name: string; kind: "sms" | "police"; status: string }[];
+  jobs: {
+    id: string;
+    name: string;
+    kind: "sms" | "whatsapp" | "police";
+    phase?: "sos" | "location";
+    status: string;
+  }[];
 };
 export type Status = {
   mode: "test" | "live";
   smsConfigured: boolean;
+  whatsappConfigured: boolean;
+  voiceEngine: "pipecat";
+  voiceCallingConfigured: boolean;
   policeConfigured: boolean;
   profile: Profile | null;
   active: Incident | null;

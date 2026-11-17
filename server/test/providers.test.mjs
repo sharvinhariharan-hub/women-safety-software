@@ -89,3 +89,47 @@ test("police adapter authenticates and deduplicates the request without claiming
     { status: "submitted" },
   );
 });
+
+test("WhatsApp uses an approved template with coordinates, map, and private link variables", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  const whatsappConfig = {
+    ...config,
+    whatsappFrom: "whatsapp:+12025550100",
+    whatsappContentSid: "HX" + "a".repeat(32),
+  };
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.body.get("To"), "whatsapp:+12025550101");
+    assert.equal(options.body.get("From"), whatsappConfig.whatsappFrom);
+    assert.equal(
+      options.body.get("ContentSid"),
+      whatsappConfig.whatsappContentSid,
+    );
+    assert.equal(options.body.has("Body"), false);
+    assert.equal(
+      JSON.parse(options.body.get("ContentVariables"))["3"],
+      "12.970000, 77.590000",
+    );
+    return new Response(
+      JSON.stringify({ sid: "SM" + "a".repeat(32), status: "queued" }),
+      { status: 201 },
+    );
+  };
+  const provider = providers(whatsappConfig);
+  assert.equal(provider.whatsappConfigured, true);
+  assert.equal(
+    (
+      await provider.whatsapp({
+        address: "+12025550101",
+        variables: { 3: "12.970000, 77.590000" },
+      })
+    ).status,
+    "submitted",
+  );
+  assert.equal(providers(config).whatsappConfigured, false);
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ status: "read" }));
+  assert.equal(await provider.smsStatus("SM" + "a".repeat(32)), "delivered");
+});

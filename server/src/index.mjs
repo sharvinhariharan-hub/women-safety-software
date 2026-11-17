@@ -10,6 +10,10 @@ const app = createApp({
   twilioSid: env.TWILIO_ACCOUNT_SID,
   twilioToken: env.TWILIO_AUTH_TOKEN,
   twilioFrom: env.TWILIO_FROM,
+  whatsappFrom: env.TWILIO_WHATSAPP_FROM,
+  whatsappContentSid: env.TWILIO_WHATSAPP_CONTENT_SID,
+  geocoderUrl: env.GEOCODER_URL,
+
   policeToken: env.POLICE_WEBHOOK_TOKEN,
   registry: env.POLICE_REGISTRY_PATH
     ? JSON.parse(readFileSync(env.POLICE_REGISTRY_PATH, "utf8"))

@@ -1,17 +1,19 @@
 # Women Safety Software
 
-One button to ask your chosen people for help, with an emergency text and a private live-location link.
+One button to ask your chosen people for help, with SMS and WhatsApp alerts containing coordinates, a map link, and a private live-location link.
 
-**Version 0.1.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
+**Version 0.2.0 · early development · test mode by default.** This is a working open-source foundation, not a validated emergency-response product. Real SMS requires a configured provider. Police notification requires a consenting agency integration; the repository does not connect to police stations or India's 112 service out of the box.
 
 ## What is implemented
 
 - Android/iOS app built with React Native and Expo, with a single-tap SOS after setup.
 - One to six configurable, consenting contacts with international phone-number validation.
+- A local Pipecat voice prototype with local Whisper/Piper speech options and constrained, factual responses. No telephone calls are enabled.
+- An optional operator-configured reverse geocoder for approximate place names.
 - An SOS is created immediately without waiting for GPS. The same link then receives location updates.
 - Background location task for development/standalone builds, plus foreground tracking and retry of the latest fix.
 - Persistent, encrypted backend storage and an outbox that submits contact alerts concurrently.
-- Twilio REST adapter with individual submission/failure/uncertain/delivery states. Test mode makes no provider calls.
+- Twilio SMS and WhatsApp template adapters, with independent per-contact/channel statuses. Both carry coordinates, maps links, and the private tracking link; a single coordinate follow-up is sent if GPS arrives after the first alert. Test mode makes no provider calls.
 - Private, random 256-bit location links, a timestamp and accuracy for each fix, stale-location warnings, 24-hour expiry, and revocation when sharing ends.
 - Optional police-partner registry: select the nearest consenting, configured station within its service radius and submit an authenticated webhook with the live link. HTTP acceptance is never represented as police dispatch.
 - Idempotent SOS retries; duplicate taps do not create duplicate active incidents. An unconfirmed request is saved on the phone and retried while the app is open.
@@ -55,7 +57,7 @@ These commands build a native development app. Android requires the Android SDK/
 2. Add your name and one to six contacts who agreed to receive SOS messages.
 3. Save the profile and grant foreground location access during setup.
 4. Optionally enable background location before an emergency. Operating-system indicators and Android's foreground-service notification may be visible.
-5. Tap **SOS** once. In test mode, every job explicitly says **Test only · nothing sent**.
+5. Select SMS, WhatsApp, or both for each contact, then tap **SOS** once. In test mode, every job explicitly says **Test only · nothing sent**.
 6. Inspect delivery states and location freshness. **End location sharing** revokes the link. It cannot recall texts or cancel an emergency response.
 
 If location access is denied, the alert still starts and the tracking page says that location is unavailable. If the server is unreachable, the app clearly states that the alert is unconfirmed and retries with the same request ID while open. It does not claim to send SMS through a phone with no internet.
@@ -75,6 +77,12 @@ TWILIO_FROM=your_SMS_capable_international_number
 ```
 
 Restart the server. A submission to Twilio is displayed as `submitted`, not `delivered`; the worker polls submitted message status every 30 seconds. This does not prove the human read the message. HTTP/network ambiguity is displayed as `unknown` and is not automatically retried because doing so can duplicate a message already accepted by the provider.
+
+## WhatsApp, coordinates, and Pipecat
+
+See [SMS and WhatsApp configuration](docs/MESSAGING.md) for the approved eight-variable WhatsApp template, sender configuration, snapshot/follow-up behavior, and optional place-name lookup. New contacts default to both channels; contacts saved before this update remain SMS-only until the owner opts them into WhatsApp.
+
+See [Pipecat voice prototype](voice_agent/README.md) for free local conversation testing and optional local speech. Pipecat is installed and tested as a real pipeline. It is not connected to a telephone carrier or police call centre, and it does not place calls. The software remains free/open source; external messaging, carrier, and hosting operation can incur costs.
 
 ## Police and support organisations
 
@@ -96,6 +104,7 @@ Mobile GPS → authenticated update ├─ latest location → recipient page
 - `POST /api/incidents` — create/recover an SOS using a UUID `requestId`; optional `location`.
 - `GET /api/incidents/:id` — individual job statuses for the owner.
 - `PUT /api/incidents/:id/location` — latitude, longitude, accuracy in metres, timestamp in epoch milliseconds.
+- `GET /api/incidents/:id/voice-brief` — authenticated, expiring incident facts for Pipecat, with no contacts or share token.
 - `POST /api/incidents/:id/end` — revoke sharing and cancel jobs not yet submitted.
 - `GET /api/shared` — private recipient read using `X-Share-Token`; no contacts or owner credentials returned.
 - `/track#<share-token>` — recipient page, polling every five seconds. The fragment is immediately removed from the address bar and sent in a header. Refreshing the page requires reopening the original message link.
@@ -108,7 +117,7 @@ Profiles, locations, private link tokens, and message payloads are encrypted wit
 
 Anyone holding a private location link can view it until sharing ends or expires. No login is required for recipients in this version. A compromised owner token controls the whole deployment: rotate it and re-pair the phone if exposed. No actual user details or credentials are included in source.
 
-There is no guaranteed one-minute delivery or response time. Carrier delays, lost connectivity, device shutdown, OS task termination, battery restrictions, permission changes, and unavailable location services can interrupt the flow. App-initiated SOS currently requires opening the app; lock-screen activation, voice/impact triggers, and physical accessories are outside this version. No calls, audible alarms, or automatic recording are made.
+There is no guaranteed one-minute delivery or response time. Carrier delays, lost connectivity, device shutdown, OS task termination, battery restrictions, permission changes, and unavailable location services can interrupt the flow. App-initiated SOS currently requires opening the app; lock-screen activation, voice/impact triggers, and physical accessories are outside this version. No telephone calls, audible alarms, or automatic recording are made. The optional local voice prototype uses a microphone only in the explicitly started browser test.
 
 Additional work before a public safety deployment: physical-device validation, contact verification and opt-out flows, human acknowledgement/escalation, abuse controls for multiple accounts, monitored operations, independent security/accessibility review, and an agreed emergency-service integration.
 
@@ -126,7 +135,7 @@ npm audit
 
 The repository includes CI for backend tests, mobile TypeScript and lint, dependency compatibility, and both platform bundles. The scoped `@expo/fingerprint` minimatch override selects a patched release for an upstream tooling dependency.
 
-Backend tests cover authentication, input validation, duplicate requests, concurrency, partial failures, uncertain delivery, restart recovery, location freshness, link expiry/revocation, police opt-in, and retention. Bundle/type checks do not validate native permissions, locked-screen tracking, real SMS delivery, police response, or battery behavior. See [device test plan](docs/DEVICE_TEST_PLAN.md).
+Backend tests cover authentication, input validation, duplicate requests, concurrency, partial failures, uncertain delivery, restart recovery, location freshness, link expiry/revocation, police opt-in, and retention. Bundle/type checks do not validate native permissions, locked-screen tracking, real SMS/WhatsApp delivery, police response, or battery behavior. See [device test plan](docs/DEVICE_TEST_PLAN.md).
 
 References: [Expo Location](https://docs.expo.dev/versions/latest/sdk/location/), [Expo TaskManager](https://docs.expo.dev/versions/latest/sdk/task-manager/), [Expo SecureStore](https://docs.expo.dev/versions/latest/sdk/securestore/), [Twilio messages API](https://www.twilio.com/docs/messaging/api/message-resource), [India's ERSS overview](https://www.mha.gov.in/emergency-response-support-system-erss).
 

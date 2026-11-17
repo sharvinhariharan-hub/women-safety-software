@@ -34,6 +34,50 @@ export function providers(config) {
     smsConfigured: Boolean(
       config.twilioSid && config.twilioToken && config.twilioFrom,
     ),
+    whatsappConfigured: Boolean(
+      config.twilioSid &&
+      config.twilioToken &&
+      /^whatsapp:\+[1-9]\d{7,14}$/.test(config.whatsappFrom ?? "") &&
+      /^HX[a-f0-9]{32}$/i.test(config.whatsappContentSid ?? ""),
+    ),
+    async whatsapp(job) {
+      const response = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(config.twilioSid)}/Messages.json`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${auth}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            To: `whatsapp:${job.address}`,
+            From: config.whatsappFrom,
+            ContentSid: config.whatsappContentSid,
+            ContentVariables: JSON.stringify(job.variables),
+          }),
+          signal: AbortSignal.timeout(10000),
+        },
+      );
+      if (!response.ok) {
+        const error = new Error("WhatsApp provider rejected request");
+        error.definitive =
+          response.status >= 400 &&
+          response.status < 500 &&
+          response.status !== 408;
+        throw error;
+      }
+      const result = await response.json();
+      if (!result.sid)
+        throw new Error("Missing provider reference; delivery unknown");
+      return {
+        status: ["failed", "undelivered", "canceled"].includes(result.status)
+          ? "failed"
+          : ["delivered", "read"].includes(result.status)
+            ? "delivered"
+            : "submitted",
+        reference: result.sid,
+      };
+    },
     async sms(job) {
       const response = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(config.twilioSid)}/Messages.json`,
@@ -82,7 +126,7 @@ export function providers(config) {
       );
       if (!response.ok) return null;
       const { status } = await response.json();
-      return status === "delivered"
+      return ["delivered", "read"].includes(status)
         ? "delivered"
         : ["failed", "undelivered", "canceled"].includes(status)
           ? "failed"

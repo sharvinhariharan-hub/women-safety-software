@@ -36,6 +36,7 @@ const blankContact = (): Contact => ({
   name: "",
   phone: "",
   consentConfirmed: false,
+  channels: ["sms", "whatsapp"],
 });
 const emptyProfile: Profile = {
   name: "",
@@ -49,10 +50,10 @@ const labels: Record<string, string> = {
   pending: "Queued on server",
   submitting: "Contacting provider",
   submitted: "Submitted · receipt not confirmed",
-  delivered: "SMS delivery confirmed",
+  delivered: "Delivery confirmed",
   failed: "Delivery failed",
   unknown: "Delivery uncertain · check independently",
-  not_configured: "SMS not connected",
+  not_configured: "Channel not connected",
   canceled: "Canceled before sending",
 };
 
@@ -363,7 +364,7 @@ export default function App() {
             <Text style={s.eyebrow}>YOUR PEOPLE. ONE SIGNAL.</Text>
             <Text style={s.brand}>Women Safety</Text>
           </View>
-          <Text style={s.version}>v0.1</Text>
+          <Text style={s.version}>v0.2</Text>
         </View>
         <View style={s.banner}>
           <Text style={s.bannerText}>
@@ -456,9 +457,31 @@ export default function App() {
                   onChangeText={(phone) => updateContact(i, { phone })}
                   style={s.input}
                 />
+                {(["sms", "whatsapp"] as const).map((channel) => (
+                  <View key={channel} style={s.row}>
+                    <Text style={s.flex}>
+                      {channel === "sms" ? "Send SMS" : "Send WhatsApp"}
+                    </Text>
+                    <Switch
+                      accessibilityLabel={`Contact ${i + 1} ${channel}`}
+                      value={(contact.channels ?? ["sms"]).includes(channel)}
+                      onValueChange={(enabled) =>
+                        updateContact(i, {
+                          channels: enabled
+                            ? [...(contact.channels ?? ["sms"]), channel]
+                            : (contact.channels ?? ["sms"]).filter(
+                                (c) => c !== channel,
+                              ),
+                          ...(enabled ? { consentConfirmed: false } : {}),
+                        })
+                      }
+                    />
+                  </View>
+                ))}
                 <View style={s.row}>
                   <Text style={s.flex}>
-                    This person agreed to receive my SOS alerts
+                    This person agreed to receive SOS alerts through the
+                    selected channels
                   </Text>
                   <Switch
                     accessibilityLabel={`Contact ${i + 1} consent`}
@@ -540,7 +563,7 @@ export default function App() {
                 ? "Check the delivery status for each contact. An active SOS does not confirm that help is on the way."
                 : pending
                   ? "The request is saved on this phone. Keep the app open to retry. Nobody is confirmed alerted yet."
-                  : "Your selected people receive an emergency text and a private link to your latest location."}
+                  : "Your selected people receive coordinates, a map link, and a private live-location link through their selected channels."}
             </Text>
             {!active ? (
               <Pressable
@@ -605,6 +628,15 @@ export default function App() {
                 {status?.smsConfigured ? "provider connected" : "not connected"}
               </Text>
               <Text style={s.item}>
+                WhatsApp:{" "}
+                {status?.whatsappConfigured
+                  ? "provider and template configured"
+                  : "not connected"}
+              </Text>
+              <Text style={s.item}>
+                Voice: Pipecat local prototype · telephone calls not connected
+              </Text>
+              <Text style={s.item}>
                 Police:{" "}
                 {!status?.profile?.policeEnabled
                   ? "not selected"
@@ -624,7 +656,9 @@ export default function App() {
                     <View key={job.id} style={s.delivery}>
                       <Text style={s.label}>
                         {job.name}
-                        {job.kind === "police" ? " · police partner" : ""}
+                        {job.kind === "police"
+                          ? " · police partner"
+                          : ` · ${job.kind === "whatsapp" ? "WhatsApp" : "SMS"}${job.phase === "location" ? " · location update" : ""}`}
                       </Text>
                       <Text style={s.caption}>
                         {labels[job.status] ?? job.status}

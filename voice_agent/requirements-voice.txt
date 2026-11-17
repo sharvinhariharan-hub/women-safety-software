@@ -1,0 +1,4 @@
+# Optional native/local speech. Whisper model weights are downloaded on first use.
+pipecat-ai[runner,webrtc,whisper]==1.16.0
+# Pipecat's Whisper module imports the Apple implementation on Apple Silicon.
+pipecat-ai[mlx-whisper]==1.16.0; sys_platform == "darwin" and platform_machine == "arm64"

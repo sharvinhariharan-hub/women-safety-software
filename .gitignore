@@ -10,3 +10,8 @@ mobile/android/
 mobile/ios/
 *.log
 .DS_Store
+
+.venv/
+__pycache__/
+*.pyc
+.models/

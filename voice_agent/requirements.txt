@@ -1,0 +1,2 @@
+# Headless conversation tests: no speech models, API credentials, or telephone calls.
+pipecat-ai==1.16.0

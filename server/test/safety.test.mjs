@@ -413,3 +413,249 @@ test("server refuses weak keys, unknown modes, and HTTP in live mode", () => {
     createApp({ ...config, mode: "live", publicUrl: "http://localhost" }),
   );
 });
+
+test("each selected contact can receive both channels independently", async (t) => {
+  const sends = [];
+  const a = await fixture(
+    t,
+    { mode: "live" },
+    {
+      smsConfigured: true,
+      whatsappConfigured: true,
+      sms: async (j) => {
+        sends.push(["sms", j]);
+        return { status: "submitted" };
+      },
+      whatsapp: async (j) => {
+        sends.push(["whatsapp", j]);
+        return { status: "submitted" };
+      },
+    },
+  );
+  await a.save({
+    ...profile,
+    contacts: [{ ...profile.contacts[0], channels: ["sms", "whatsapp"] }],
+  });
+  const position = fix();
+  await a.trigger({ location: position });
+  await settled(a);
+  assert.equal(sends.length, 2);
+  for (const [, j] of sends) {
+    assert.ok(j.message.includes("12.970000, 77.590000"));
+    assert.ok(j.message.includes("https://www.google.com/maps/search/"));
+    assert.ok(j.message.includes("/track#"));
+    assert.equal(j.variables["3"], "12.970000, 77.590000");
+  }
+  assert.equal((await a.request("/api/status")).data.whatsappConfigured, true);
+});
+
+test("missing GPS sends initial alerts immediately then only one coordinate follow-up per channel", async (t) => {
+  const sends = [];
+  const send = async (j) => {
+    sends.push(structuredClone(j));
+    return { status: "submitted" };
+  };
+  const a = await fixture(
+    t,
+    { mode: "live" },
+    {
+      smsConfigured: true,
+      whatsappConfigured: true,
+      sms: send,
+      whatsapp: send,
+    },
+  );
+  await a.save({
+    ...profile,
+    contacts: [{ ...profile.contacts[0], channels: ["sms", "whatsapp"] }],
+  });
+  const r = await a.trigger();
+  await settled(a);
+  assert.equal(sends.length, 2);
+  assert.ok(sends.every((j) => j.message.includes("Not available yet")));
+  await a.request(`/api/incidents/${r.data.id}/location`, "PUT", fix());
+  await settled(a);
+  assert.equal(sends.length, 4);
+  assert.equal(sends.filter((j) => j.phase === "location").length, 2);
+  assert.ok(
+    sends
+      .filter((j) => j.phase === "location")
+      .every(
+        (j) =>
+          j.message.includes("12.970000, 77.590000") &&
+          j.message.includes("/track#"),
+      ),
+  );
+  await a.request(
+    `/api/incidents/${r.data.id}/location`,
+    "PUT",
+    fix({ timestamp: Date.now() + 1 }),
+  );
+  await a.work();
+  await settled(a);
+  assert.equal(sends.length, 4);
+});
+
+test("a WhatsApp failure does not stop SMS delivery", async (t) => {
+  const a = await fixture(
+    t,
+    { mode: "live" },
+    {
+      smsConfigured: true,
+      whatsappConfigured: true,
+      sms: async () => ({ status: "submitted" }),
+      whatsapp: async () => {
+        throw Object.assign(new Error("Rejected"), { definitive: true });
+      },
+    },
+  );
+  await a.save({
+    ...profile,
+    contacts: [{ ...profile.contacts[0], channels: ["sms", "whatsapp"] }],
+  });
+  await a.trigger();
+  await settled(a);
+  assert.equal(
+    a.store.jobs().find((j) => j.kind === "sms").status,
+    "submitted",
+  );
+  assert.equal(
+    a.store.jobs().find((j) => j.kind === "whatsapp").status,
+    "failed",
+  );
+});
+
+test("WhatsApp opt-out, invalid channels, and legacy SMS-only contacts are respected", async (t) => {
+  const a = await fixture(t);
+  for (const channels of [[], ["email"], ["sms", "sms"], "sms"])
+    assert.equal(
+      (
+        await a.save({
+          ...profile,
+          contacts: [{ ...profile.contacts[0], channels }],
+        })
+      ).status,
+      400,
+    );
+  await a.save();
+  await a.trigger();
+  assert.deepEqual(
+    a.store.jobs().map((j) => j.kind),
+    ["sms"],
+  );
+});
+
+test("missing WhatsApp credentials are explicit while SMS still submits", async (t) => {
+  const a = await fixture(
+    t,
+    { mode: "live" },
+    {
+      smsConfigured: true,
+      whatsappConfigured: false,
+      sms: async () => ({ status: "submitted" }),
+    },
+  );
+  await a.save({
+    ...profile,
+    contacts: [{ ...profile.contacts[0], channels: ["sms", "whatsapp"] }],
+  });
+  await a.trigger();
+  await settled(a);
+  assert.equal(
+    a.store.jobs().find((j) => j.kind === "whatsapp").status,
+    "not_configured",
+  );
+  assert.equal(
+    a.store.jobs().find((j) => j.kind === "sms").status,
+    "submitted",
+  );
+});
+
+test("voice brief is authenticated, excludes contacts and private link tokens, and is revoked when ended", async (t) => {
+  const a = await fixture(t);
+  await a.save();
+  const r = await a.trigger({ location: fix() });
+  const path = `/api/incidents/${r.data.id}/voice-brief`;
+  assert.equal((await a.request(path, "GET", undefined, "wrong")).status, 401);
+  const brief = await a.request(path);
+  assert.equal(brief.status, 200);
+  assert.ok(brief.data.issue.includes("unknown"));
+  assert.equal(brief.data.shareToken, undefined);
+  assert.equal(brief.data.contacts, undefined);
+  await a.request(`/api/incidents/${r.data.id}/end`, "POST");
+  assert.equal((await a.request(path)).status, 410);
+});
+
+test("six contacts on both channels are twelve independent concurrent submissions", async (t) => {
+  let starts = 0,
+    release;
+  const barrier = new Promise((resolve) => {
+    release = resolve;
+  });
+  const send = async () => {
+    if (++starts === 12) release();
+    await barrier;
+    return { status: "submitted" };
+  };
+  const a = await fixture(
+    t,
+    { mode: "live" },
+    {
+      smsConfigured: true,
+      whatsappConfigured: true,
+      sms: send,
+      whatsapp: send,
+    },
+  );
+  await a.save({
+    ...profile,
+    contacts: Array.from({ length: 6 }, (_, i) => ({
+      name: `Contact ${i}`,
+      phone: `+1202555010${i}`,
+      consentConfirmed: true,
+      channels: ["sms", "whatsapp"],
+    })),
+  });
+  await a.trigger({ location: fix() });
+  await settled(a);
+  assert.equal(starts, 12);
+  assert.equal(a.store.jobs().length, 12);
+});
+
+test("switching the server to live cannot send location follow-ups for an older test incident", async (t) => {
+  let sent = 0;
+  const a = await fixture(
+    t,
+    { mode: "live" },
+    {
+      smsConfigured: true,
+      whatsappConfigured: true,
+      sms: async () => {
+        sent++;
+      },
+      whatsapp: async () => {
+        sent++;
+      },
+    },
+  );
+  const id = randomUUID();
+  a.store.set(`incident:${id}`, {
+    id,
+    mode: "test",
+    status: "active",
+    location: fix(),
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 86400000,
+    name: "Demo",
+    shareToken: "a".repeat(64),
+  });
+  a.store.job(randomUUID(), id, "sms", {
+    phase: "sos",
+    status: "test_only",
+    containsLocation: false,
+    address: "+12025550101",
+  });
+  await a.work();
+  assert.equal(sent, 0);
+  assert.equal(a.store.jobs().length, 1);
+});
